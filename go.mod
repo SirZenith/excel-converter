@@ -1,4 +1,4 @@
-module github.com/SirZenith/excel-convertor
+module github.com/SirZenith/excel-converter
 
 go 1.25.6
 
