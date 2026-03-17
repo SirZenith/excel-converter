@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 const keyEnvLogLevel = "EXCEL_CONVERTER_LOG_LEVEL"
 
+const exportConfigArgsSeparator = "|"
 const excelExportConfigSheet = "export"
 
 const excelDataTypeNameListPrefix = "list"
@@ -48,41 +50,102 @@ func main() {
 	log.SetLevel(getLogLevel())
 
 	var (
-		inputName  string
-		outputName string
+		inputName string
 	)
 
 	cmd := &cli.Command{
 		Name:  "excel-converter",
 		Usage: "a tool that converts Excel file to JSON",
-		Flags: []cli.Flag{},
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:     "output-dir",
+				Aliases:  []string{"o"},
+				Required: true,
+			},
+			&cli.StringFlag{
+				Name:     "export-config",
+				Aliases:  []string{"c"},
+				Required: true,
+			},
+		},
 		Arguments: []cli.Argument{
 			&cli.StringArg{
 				Name:        "inputName",
 				UsageText:   "<input>",
 				Destination: &inputName,
 			},
-			&cli.StringArg{
-				Name:        "outputName",
-				UsageText:   " <output>",
-				Destination: &outputName,
-			},
 		},
 		Action: func(_ context.Context, cmd *cli.Command) error {
-			if err := convertFile(inputName, outputName); err == nil {
-				log.Infof("exported: %s -> %s", inputName, outputName)
-			} else {
-				log.Warnf("failed to export %s: %s\n", cmd.String("inputName"), err)
+			outputDir := cmd.String("output-dir")
+			if err := os.MkdirAll(outputDir, 0755); err != nil {
+				return fmt.Errorf("failed to create output directory: %s", err)
 			}
+
+			basename, args, err := getOutputArgs(cmd.String("export-config"), inputName)
+			if err != nil {
+				return fmt.Errorf("can't find export name for %s: %s", inputName, err)
+			}
+
+			outputName := filepath.Join(outputDir, basename)
+			if err := convertFile(inputName, outputName, args); err != nil {
+				return fmt.Errorf("failed to export %s: %s\n", cmd.String("inputName"), err)
+			}
+
+			fmt.Printf("exported: %s -> %s\n", inputName, outputName)
+
 			return nil
 		},
 	}
 
 	err := cmd.Run(context.Background(), os.Args)
 	if err != nil {
-		log.Errorf("Error occured while converting: %s\n", err)
+		log.Error(err)
 		os.Exit(1)
 	}
+}
+
+func getOutputArgs(configFile, inputName string) (string, []string, error) {
+	var err error
+
+	basename := filepath.Base(inputName)
+	ext := filepath.Ext(basename)
+	stem := strings.TrimSuffix(basename, ext)
+
+	file, err := os.Open(configFile)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to open config file: %s", err)
+	}
+	defer file.Close()
+
+	outputName := ""
+	var args []string
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, stem) {
+			parts := strings.Split(line, exportConfigArgsSeparator)
+			if len(parts) < 2 {
+				err = fmt.Errorf("export config line lacks necessary argument")
+				break
+			}
+
+			outputName = parts[1]
+			args = parts[2:]
+		}
+	}
+
+	if err = scanner.Err(); err != nil {
+		return "", nil, fmt.Errorf("error occured while reading config file: %s", err)
+	}
+
+	if outputName == "" {
+		return "", nil, fmt.Errorf("no export name found for %s", inputName)
+	}
+
+	outputName += ".json"
+
+	return outputName, args, nil
 }
 
 func getLogLevel() log.Level {
@@ -102,7 +165,7 @@ func getLogLevel() log.Level {
 }
 
 // convertFile converts given input file to output json.
-func convertFile(inputName, outputName string) error {
+func convertFile(inputName, outputName string, _args []string) error {
 	if !isExcelFile(inputName) {
 		return fmt.Errorf("input is not a Excel file: %s", inputName)
 	}
@@ -127,7 +190,7 @@ func convertFile(inputName, outputName string) error {
 	}
 	defer f.Close()
 
-	exportRows, err := f.GetRows("export")
+	exportRows, err := f.GetRows(excelExportConfigSheet)
 	if err != nil {
 		return fmt.Errorf("failed to read export config sheet: %s", err)
 	}
