@@ -34,6 +34,11 @@ func cmdToScript() *cli.Command {
 				Aliases:  []string{"c"},
 				Required: true,
 			},
+			&cli.StringFlag{
+				Name:     "json-dir",
+				Aliases:  []string{"o"},
+				Required: true,
+			},
 		},
 		Arguments: []cli.Argument{
 			&cli.StringArg{
@@ -45,6 +50,7 @@ func cmdToScript() *cli.Command {
 		Action: func(_ context.Context, cmd *cli.Command) error {
 			outputDir := cmd.String("output-dir")
 			configPath := cmd.String("export-config")
+			jsonDir := cmd.String("json-dir")
 
 			if !isExcelFile(inputName) {
 				return fmt.Errorf("input is not a Excel file: %s", inputName)
@@ -59,7 +65,7 @@ func cmdToScript() *cli.Command {
 				return fmt.Errorf("can't find export name for %s: %s", inputName, err)
 			}
 
-			jsonName := nameStem + ".json"
+			jsonName := filepath.Join(jsonDir, nameStem+".json")
 			outputName := filepath.Join(outputDir, strcase.ToCamel(nameStem)+".cs")
 			if err := genDataClassDefinition(inputName, outputName, jsonName, nameStem); err != nil {
 				return fmt.Errorf("failed to export %s: %s\n", cmd.String("inputName"), err)
@@ -91,17 +97,23 @@ func genDataClassDefinition(inputName, outputName, jsonName, nameStem string) er
 	}
 
 	rootClass := dataClass{
-		name:         strcase.ToCamel(nameStem),
+		name:         strcase.ToCamel(nameStem) + "Cfg",
 		fields:       map[string]dataField{},
 		childClasses: map[string]dataClass{},
+		jsonFile:     jsonName,
 	}
 	for _, sheet := range sheetList {
 		if child, err := genSheetDataClass(f, sheet); err == nil {
-			fieldName := strcase.ToLowerCamel(sheet)
-			rootClass.fields[fieldName] = dataField{
+			rootClass.fields[sheet] = dataField{
 				t: dataFieldType{
-					t:          excelDataTypeObject,
-					customName: child.name,
+					t: excelDataTypeDictionary,
+					keyType: &dataFieldType{
+						t: excelDataTypeString,
+					},
+					elementType: &dataFieldType{
+						t:          excelDataTypeObject,
+						customName: child.name,
+					},
 				},
 				name: sheet,
 			}
@@ -149,7 +161,7 @@ func genDataClassFromFields(sheetName string, fields []excelField) dataClass {
 	}
 
 	for _, field := range fields {
-		name := strcase.ToCamel(field.name)
+		name := field.name
 
 		if field.indexPath == nil {
 			switch field.dataType {
@@ -195,7 +207,7 @@ func addChildClassByIndexPath(parentClass *dataClass, segments []string, dataTyp
 		seg := segments[index]
 		next_seg := segments[index+1]
 
-		fieldName := strcase.ToCamel(seg)
+		fieldName := seg
 
 		_, err = strconv.Atoi(next_seg)
 		if err != nil {
@@ -246,7 +258,7 @@ func addChildClassByIndexPath(parentClass *dataClass, segments []string, dataTyp
 	}
 
 	if err == nil && classWalker != nil {
-		lastField := strcase.ToCamel(segments[last_index])
+		lastField := segments[last_index]
 		classWalker.fields[lastField] = dataField{
 			t: dataFieldType{
 				t: dataType,

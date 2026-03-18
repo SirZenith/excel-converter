@@ -23,12 +23,14 @@ const (
 	excelDataTypeFloat
 	excelDataTypeString
 	excelDataTypeList
+	excelDataTypeDictionary
 	excelDataTypeObject
 	excelDataTypeUID
 )
 
 type dataFieldType struct {
 	t           int
+	keyType     *dataFieldType
 	elementType *dataFieldType
 	customName  string // class name for object type
 }
@@ -47,6 +49,8 @@ func (t *dataFieldType) getCSTypeName() string {
 		} else {
 			return fmt.Sprintf("List<%s>", t.elementType.getCSTypeName())
 		}
+	case excelDataTypeDictionary:
+		return fmt.Sprintf("Dictionary<%s, %s>", t.keyType.getCSTypeName(), t.elementType.getCSTypeName())
 	case excelDataTypeObject:
 		return t.customName
 	case excelDataTypeUID:
@@ -136,12 +140,17 @@ type dataClass struct {
 	name         string
 	fields       map[string]dataField
 	childClasses map[string]dataClass
+	jsonFile     string
 }
 
 const dataClassPrelude = `using System;
+using System.IO;
 using System.Collections.Generic;
 using UnityEngine;
+using LitJson;
 
+namespace GameConfig
+{
 `
 
 // genCSScript writes C# definition of current class to writer.
@@ -167,16 +176,21 @@ func (c *dataClass) genCSScript(writer *bufio.Writer, indent string) error {
 		return children[i].name < children[j].name
 	})
 
-	childIndent := indent + "    "
-
-	if indent == "" {
+	isRoot := indent == ""
+	if isRoot {
 		_, err := writer.WriteString(dataClassPrelude)
 		if err != nil {
 			return err
 		}
+
+		indent += "    "
 	}
 
-	writeStringLn(writer, indent, "[System.Serializable]")
+	childIndent := indent + "    "
+
+	if isRoot {
+		writeStringLn(writer, indent, "[Serializable]")
+	}
 	writeStringLn(writer, indent, "public class ", c.name)
 	writeStringLn(writer, indent, "{")
 
@@ -188,6 +202,11 @@ func (c *dataClass) genCSScript(writer *bufio.Writer, indent string) error {
 		writer.WriteString("\n")
 	}
 
+	if c.jsonFile != "" {
+		writeStringLn(writer, childIndent, "private readonly static string JsonName = \"", strings.ReplaceAll(c.jsonFile, "\\", "/"), "\";")
+		writer.WriteString("\n")
+	}
+
 	for _, field := range fields {
 		err := field.genCSScript(writer, childIndent)
 		if err != nil {
@@ -195,8 +214,49 @@ func (c *dataClass) genCSScript(writer *bufio.Writer, indent string) error {
 		}
 		writer.WriteString("\n")
 	}
+	writer.WriteString("\n")
+
+	if isRoot {
+		writeSingletonMethod(writer, c.name, childIndent)
+	}
 
 	writeStringLn(writer, indent, "}")
 
+	if isRoot {
+		writeStringLn(writer, "}")
+	}
+
 	return nil
+}
+
+func writeSingletonMethod(writer *bufio.Writer, className, childIndent string) {
+	writeStringLn(writer, childIndent, "public static MonsterCfg LoadCfgObject()")
+	writeStringLn(writer, childIndent, "{")
+	writeStringLn(writer, childIndent, "	string json = LoadJsonFromAsset();")
+	writeStringLn(writer, childIndent, "	return json == null ? null : JsonMapper.ToObject<MonsterCfg>(json);")
+	writeStringLn(writer, childIndent, "}")
+	writer.WriteString("\n")
+	writeStringLn(writer, childIndent, "public static string LoadJsonFromAsset()")
+	writeStringLn(writer, childIndent, "{")
+	writer.WriteString("\n")
+	writeStringLn(writer, childIndent, "	TextAsset asset = Resources.Load<TextAsset>(JsonName.Replace(\".json\", \"\"));")
+	writeStringLn(writer, childIndent, "	return asset == null ? null : asset.text;")
+	writeStringLn(writer, childIndent, "}")
+	writer.WriteString("\n")
+	writeStringLn(writer, childIndent, "public static string LoadJsonFromPath()")
+	writeStringLn(writer, childIndent, "{")
+	writeStringLn(writer, childIndent, "	string configPath = GetConfigPath();")
+	writeStringLn(writer, childIndent, "	if (!File.Exists(configPath))")
+	writeStringLn(writer, childIndent, "	{")
+	writeStringLn(writer, childIndent, "		Debug.Log($\"game config json not found: {configPath}\");")
+	writeStringLn(writer, childIndent, "		return null;")
+	writeStringLn(writer, childIndent, "	}")
+	writer.WriteString("\n")
+	writeStringLn(writer, childIndent, "	return File.ReadAllText(configPath);")
+	writeStringLn(writer, childIndent, "}")
+	writer.WriteString("\n")
+	writeStringLn(writer, childIndent, "private static string GetConfigPath()")
+	writeStringLn(writer, childIndent, "{")
+	writeStringLn(writer, childIndent, "	return Path.Combine(Application.streamingAssetsPath, JsonName);")
+	writeStringLn(writer, childIndent, "}")
 }
