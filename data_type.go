@@ -28,6 +28,8 @@ const (
 	excelDataTypeUID
 )
 
+const dataClassGeneratedWarning = "// This code is generated via external tool, don't modify it."
+
 type dataFieldType struct {
 	t           int
 	keyType     *dataFieldType
@@ -144,10 +146,8 @@ type dataClass struct {
 }
 
 const dataClassPrelude = `using System;
-using System.IO;
 using System.Collections.Generic;
 using UnityEngine;
-using LitJson;
 
 namespace GameConfig
 {
@@ -188,6 +188,7 @@ func (c *dataClass) genCSScript(writer *bufio.Writer, indent string) error {
 
 	childIndent := indent + "    "
 
+	writeStringLn(writer, indent, dataClassGeneratedWarning)
 	if isRoot {
 		writeStringLn(writer, indent, "[Serializable]")
 	}
@@ -203,21 +204,17 @@ func (c *dataClass) genCSScript(writer *bufio.Writer, indent string) error {
 	}
 
 	if c.jsonFile != "" {
-		writeStringLn(writer, childIndent, "private readonly static string JsonName = \"", strings.ReplaceAll(c.jsonFile, "\\", "/"), "\";")
+		writeStringLn(writer, childIndent, "public readonly static string JsonName = \"", strings.ReplaceAll(c.jsonFile, "\\", "/"), "\";")
 		writer.WriteString("\n")
 	}
 
+	writeStringLn(writer, childIndent, dataClassGeneratedWarning)
 	for _, field := range fields {
 		err := field.genCSScript(writer, childIndent)
 		if err != nil {
 			return fmt.Errorf("field %s export failed: %s", field.name, err)
 		}
 		writer.WriteString("\n")
-	}
-	writer.WriteString("\n")
-
-	if isRoot {
-		writeSingletonMethod(writer, c.name, childIndent)
 	}
 
 	writeStringLn(writer, indent, "}")
@@ -227,36 +224,4 @@ func (c *dataClass) genCSScript(writer *bufio.Writer, indent string) error {
 	}
 
 	return nil
-}
-
-func writeSingletonMethod(writer *bufio.Writer, className, childIndent string) {
-	writeStringLn(writer, childIndent, "public static MonsterCfg LoadCfgObject()")
-	writeStringLn(writer, childIndent, "{")
-	writeStringLn(writer, childIndent, "	string json = LoadJsonFromAsset();")
-	writeStringLn(writer, childIndent, "	return json == null ? null : JsonMapper.ToObject<MonsterCfg>(json);")
-	writeStringLn(writer, childIndent, "}")
-	writer.WriteString("\n")
-	writeStringLn(writer, childIndent, "public static string LoadJsonFromAsset()")
-	writeStringLn(writer, childIndent, "{")
-	writer.WriteString("\n")
-	writeStringLn(writer, childIndent, "	TextAsset asset = Resources.Load<TextAsset>(JsonName.Replace(\".json\", \"\"));")
-	writeStringLn(writer, childIndent, "	return asset == null ? null : asset.text;")
-	writeStringLn(writer, childIndent, "}")
-	writer.WriteString("\n")
-	writeStringLn(writer, childIndent, "public static string LoadJsonFromPath()")
-	writeStringLn(writer, childIndent, "{")
-	writeStringLn(writer, childIndent, "	string configPath = GetConfigPath();")
-	writeStringLn(writer, childIndent, "	if (!File.Exists(configPath))")
-	writeStringLn(writer, childIndent, "	{")
-	writeStringLn(writer, childIndent, "		Debug.Log($\"game config json not found: {configPath}\");")
-	writeStringLn(writer, childIndent, "		return null;")
-	writeStringLn(writer, childIndent, "	}")
-	writer.WriteString("\n")
-	writeStringLn(writer, childIndent, "	return File.ReadAllText(configPath);")
-	writeStringLn(writer, childIndent, "}")
-	writer.WriteString("\n")
-	writeStringLn(writer, childIndent, "private static string GetConfigPath()")
-	writeStringLn(writer, childIndent, "{")
-	writeStringLn(writer, childIndent, "	return Path.Combine(Application.streamingAssetsPath, JsonName);")
-	writeStringLn(writer, childIndent, "}")
 }
