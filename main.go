@@ -91,7 +91,7 @@ func main() {
 				return fmt.Errorf("failed to export %s: %s\n", cmd.String("inputName"), err)
 			}
 
-			fmt.Printf("exported: %s -> %s\n", inputName, outputName)
+			fmt.Print(outputName)
 
 			return nil
 		},
@@ -302,7 +302,6 @@ func convertSheet(f *excelize.File, sheet string) (map[string]any, error) {
 	}
 
 	if err = rows.Close(); err != nil {
-		fmt.Println(err)
 		log.Warnf("failed to close sheet %s: %s\n", sheet, err)
 	}
 
