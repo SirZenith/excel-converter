@@ -184,8 +184,12 @@ func genDataClassFromFields(sheetName string, fields []excelField) dataClass {
 					comment: field.comment,
 				}
 			case excelDataTypeList:
+				elementType := parseListElementType(field.elementType)
 				mainClass.fields[name] = dataField{
-					t:       parseListElementType(field.elementType),
+					t: dataFieldType{
+						t:           excelDataTypeList,
+						elementType: &elementType,
+					},
 					name:    name,
 					comment: field.comment,
 				}
