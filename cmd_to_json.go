@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -117,9 +118,13 @@ func convertSheet(f *excelize.File, sheet string) (map[string]any, error) {
 		return nil, fmt.Errorf("no field is defined in sheet %s", sheet)
 	}
 
+	rowIndex := 3
+
 	result := map[string]any{}
 	var row []string
 	for rows.Next() {
+		rowIndex++
+
 		row, err = rows.Columns()
 		if err != nil {
 			err = fmt.Errorf("failed to read row from sheet '%s': %s", sheet, err)
@@ -151,7 +156,10 @@ func convertSheet(f *excelize.File, sheet string) (map[string]any, error) {
 				uid = rawValue
 			}
 
-			storeValue(rowData, field, rawValue)
+			err = storeValue(rowData, field, rawValue)
+			if err != nil {
+				log.Warnf("failed to convert config data (row %d): %s", rowIndex, err)
+			}
 		}
 
 		if uid != "" {
@@ -184,36 +192,123 @@ func storeValue(resultMap map[string]any, field excelField, rawValue string) err
 			resultMap[field.name] = value
 		}
 	} else {
-		lastIndex := len(indexPath) - 1
-		target := resultMap
-
-		for i := range lastIndex {
-			segment := indexPath[i]
-
-			value, exists := target[segment]
-			if !exists {
-				value = map[string]any{}
-				target[segment] = value
-			}
-
-			container, ok := value.(map[string]any)
-			if ok {
-				target = container
-			} else {
-				err = fmt.Errorf("indexing into a non-map value: %s", field.name)
-			}
-		}
-
-		if err == nil {
-			lastSegment := indexPath[lastIndex]
-			value, err = convertRawValue(rawValue, field.dataType, field.elementType)
-			if err == nil {
-				target[lastSegment] = value
-			}
-		}
+		err = storeValueWithIndexPath(resultMap, field, rawValue)
 	}
 
 	return err
+}
+
+func storeValueWithIndexPath(resultMap map[string]any, field excelField, rawValue string) error {
+	indexPath := field.indexPath
+	if indexPath == nil {
+		return fmt.Errorf("no index path found in field data")
+	}
+
+	lastIndex := len(indexPath) - 1
+	var (
+		back_ref     any
+		back_ref_seg string
+		target       = any(resultMap)
+	)
+
+	var err error
+
+	for i := range lastIndex {
+		segment := indexPath[i]
+
+		next_seg := indexPath[i+1]
+		_, err = strconv.Atoi(next_seg)
+		isList := err == nil
+
+		castedMap, castOk := target.(map[string]any)
+		if !castOk {
+			err = fmt.Errorf("indexing into a non-map value: %s @ %s", field.name, segment)
+			break
+		}
+
+		value, exists := castedMap[segment]
+		if isList {
+			if exists {
+				if _, ok := value.([]any); !ok {
+					err = fmt.Errorf("trying to index a map value with numberic index: %s @ %s", field.name, next_seg)
+					break
+				}
+			} else {
+				value = []any{}
+				castedMap[segment] = value
+			}
+		} else {
+			if exists {
+				if _, ok := value.(map[string]any); !ok {
+					err = fmt.Errorf("indexing into a non-map value: %s @ %s", field.name, next_seg)
+					break
+				}
+			} else {
+				value = map[string]any{}
+				castedMap[segment] = value
+			}
+		}
+
+		back_ref = target
+		back_ref_seg = segment
+		target = value
+	}
+
+	if err == nil {
+		lastSegment := indexPath[lastIndex]
+
+		var (
+			value any
+			index int
+		)
+
+		value, err = convertRawValue(rawValue, field.dataType, field.elementType)
+		if err == nil {
+			index, err = strconv.Atoi(lastSegment)
+			isList := err == nil
+
+			if isList {
+				err = finalizeListIndexPath(target, back_ref, back_ref_seg, index, value)
+			} else {
+				if castedMap, ok := target.(map[string]any); ok {
+					castedMap[lastSegment] = value
+				} else {
+					err = fmt.Errorf("trying to index a non-list value: %s @ %s", field.name, lastSegment)
+				}
+			}
+		}
+
+	}
+
+	return err
+}
+
+func finalizeListIndexPath(container any, back_ref any, back_ref_seg string, index int, value any) error {
+	if back_ref == nil {
+		return fmt.Errorf("parent element is required for list index path")
+	}
+
+	castedMap, ok := back_ref.(map[string]any)
+	if !ok {
+		return fmt.Errorf("parent element of list index path is not a map")
+	}
+
+	castedList, ok := container.([]any)
+	if !ok {
+		return fmt.Errorf("list index path finalization can't store value to non-list parent")
+	}
+
+	valueType := reflect.TypeOf(value)
+	zeroValue := reflect.Zero(valueType).Interface()
+
+	for range index - len(castedList) {
+		castedList = append(castedList, zeroValue)
+	}
+
+	castedList[index-1] = value
+	castedMap[back_ref_seg] = castedList
+
+	return nil
 }
 
 // convertRawValue converts Excel value to a data.

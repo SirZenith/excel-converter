@@ -207,7 +207,7 @@ func addChildClassByIndexPath(parentClass *dataClass, segments []string, dataTyp
 	last_index := len(segments) - 1
 	classWalker := parentClass
 
-	for index := range last_index - 1 {
+	for index := range last_index {
 		seg := segments[index]
 		next_seg := segments[index+1]
 
