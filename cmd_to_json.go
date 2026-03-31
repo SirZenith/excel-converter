@@ -155,7 +155,11 @@ func convertSheet(f *excelize.File, sheet string) (map[string]any, error) {
 		}
 
 		if uid != "" {
-			result[uid] = rowData
+			if _, exists := result[uid]; exists {
+				log.Warnf("repeated UID found in sheet %s: %s", sheet, uid)
+			} else {
+				result[uid] = rowData
+			}
 		}
 	}
 
