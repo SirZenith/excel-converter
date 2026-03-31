@@ -189,7 +189,7 @@ func storeValue(resultMap map[string]any, field excelField, rawValue string) err
 			if ok {
 				target = container
 			} else {
-				err = fmt.Errorf("indexing into a non-map value", field.name)
+				err = fmt.Errorf("indexing into a non-map value: %s", field.name)
 			}
 		}
 
