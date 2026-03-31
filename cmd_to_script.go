@@ -22,7 +22,7 @@ func cmdToScript() *cli.Command {
 
 	return &cli.Command{
 		Name:  "csharp",
-		Usage: "converting Excel file to JSON",
+		Usage: "converting Excel file to C# class definition",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:     "output-dir",
