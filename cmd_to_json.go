@@ -187,9 +187,16 @@ func storeValue(resultMap map[string]any, field excelField, rawValue string) err
 		lastIndex := len(indexPath) - 1
 		target := resultMap
 
-		for i := range lastIndex - 1 {
+		for i := range lastIndex {
 			segment := indexPath[i]
-			container, ok := target[segment].(map[string]any)
+
+			value, exists := target[segment]
+			if !exists {
+				value = map[string]any{}
+				target[segment] = value
+			}
+
+			container, ok := value.(map[string]any)
 			if ok {
 				target = container
 			} else {
