@@ -166,7 +166,7 @@ func composeExcelFieldList(commentNames, exportNames, dataTypes []string) ([]exc
 			break
 		}
 
-		if commentCnt >= i {
+		if commentCnt > i {
 			comment = commentNames[i]
 		}
 
