@@ -13,6 +13,7 @@ import (
 
 const exportConfigArgsSeparator = "|"
 const excelExportConfigSheet = "export"
+const excelSystemConfigSheet = "config"
 
 func getLogLevel() log.Level {
 	level := os.Getenv(keyEnvLogLevel)

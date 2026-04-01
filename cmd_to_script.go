@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/log"
 	"github.com/urfave/cli/v3"
@@ -103,8 +104,23 @@ func genDataClassDefinition(inputName, outputName, jsonName, nameStem string) er
 		jsonFile:     jsonName,
 	}
 	for _, sheet := range sheetList {
-		if child, err := genSheetDataClass(f, sheet); err == nil {
-			rootClass.fields[sheet] = dataField{
+		var (
+			child *dataClass
+			field dataField
+		)
+
+		if sheet == excelSystemConfigSheet {
+			child, err = genSystemConfigSheetDataClass(f, sheet)
+			field = dataField{
+				t: dataFieldType{
+					t:          excelDataTypeObject,
+					customName: child.name,
+				},
+				name: sheet,
+			}
+		} else {
+			child, err = genSheetDataClass(f, sheet)
+			field = dataField{
 				t: dataFieldType{
 					t: excelDataTypeDictionary,
 					keyType: &dataFieldType{
@@ -117,6 +133,10 @@ func genDataClassDefinition(inputName, outputName, jsonName, nameStem string) er
 				},
 				name: sheet,
 			}
+		}
+
+		if err == nil {
+			rootClass.fields[sheet] = field
 			rootClass.childClasses[child.name] = *child
 		} else {
 			log.Warnf("failed to generate data class for sheet %s: %s\n", sheet, err)
@@ -124,6 +144,85 @@ func genDataClassDefinition(inputName, outputName, jsonName, nameStem string) er
 	}
 
 	return writeCSScript(outputName, rootClass)
+}
+
+func genSystemConfigSheetDataClass(f *excelize.File, sheet string) (*dataClass, error) {
+	rows, err := f.Rows(sheet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read sheet '%s': %s", sheet, err)
+	}
+
+	rowIndex := 0
+	fields := []excelField{}
+	usedNames := map[string]bool{}
+
+	for rows.Next() {
+		rowIndex++
+
+		row, err := rows.Columns()
+		if err != nil {
+			log.Warnf("failed to read row data from sheet %s", sheet)
+			break
+		}
+
+		colCnt := len(row)
+		if colCnt == 0 {
+			continue
+		} else if colCnt < 3 {
+			log.Warnf("system config entry at row %d has less than 3 columns, this row is ignored.", rowIndex)
+			continue
+		}
+
+		name := row[0]
+		if name == "" {
+			continue
+		}
+
+		if _, repeated := usedNames[name]; repeated {
+			log.Warnf("system config entry name '%s' is repeated", name)
+			continue
+		}
+
+		typeString := row[1]
+		elementType := ""
+		dataType := typeStringToDataType(typeString)
+		if dataType == excelDataTypeUnknown {
+			log.Warnf("no proper data type is assigned to row %d", rowIndex)
+			continue
+		}
+
+		comment := ""
+		if colCnt >= 4 {
+			comment = row[3]
+		}
+
+		usedNames[name] = true
+
+		if dataType == excelDataTypeList {
+			elementType = strings.TrimPrefix(typeString, excelDataTypeNameListPrefix)
+		}
+
+		fields = append(fields, excelField{
+			index:       rowIndex - 1,
+			dataType:    dataType,
+			elementType: elementType,
+			name:        name,
+			comment:     comment,
+		})
+	}
+
+	fieldCnt := len(fields)
+	if fieldCnt <= 0 {
+		return nil, fmt.Errorf("no field is defined in sheet %s", sheet)
+	}
+
+	if err = rows.Close(); err != nil {
+		log.Warnf("failed to close sheet %s: %s\n", sheet, err)
+	}
+
+	result := genDataClassFromFields(sheet, fields)
+
+	return &result, nil
 }
 
 // genSheetDataClass generate data class info for given sheet.

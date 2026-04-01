@@ -91,7 +91,15 @@ func convertFile(inputName, outputName string, _ []string) error {
 
 	result := map[string]any{}
 	for _, sheet := range sheetList {
-		if sheetData, err := convertSheet(f, sheet); err == nil {
+		var sheetData map[string]any
+
+		if sheet == excelSystemConfigSheet {
+			sheetData, err = convertSystemConfigSheet(f, sheet)
+		} else {
+			sheetData, err = convertSheet(f, sheet)
+		}
+
+		if err == nil {
 			result[sheet] = sheetData
 		} else {
 			log.Warnf("failed to convert sheet %s: %s\n", sheet, err)
@@ -99,6 +107,67 @@ func convertFile(inputName, outputName string, _ []string) error {
 	}
 
 	return writeJSON(outputName, result)
+}
+
+func convertSystemConfigSheet(f *excelize.File, sheet string) (map[string]any, error) {
+	rows, err := f.Rows(excelSystemConfigSheet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read sheet '%s': %s", sheet, err)
+	}
+
+	rowIndex := 0
+	result := map[string]any{}
+
+	var row []string
+	for rows.Next() {
+		rowIndex++
+
+		row, err = rows.Columns()
+		if err != nil {
+			log.Warnf("failed to read row data from sheet %s", sheet)
+			break
+		}
+
+		colCnt := len(row)
+		if colCnt == 0 {
+			continue
+		} else if colCnt < 3 {
+			log.Warnf("system config entry at row %d has less than 3 columns, this row is ignored.", rowIndex)
+			continue
+		}
+
+		fieldName := row[0]
+		if fieldName == "" {
+			continue
+		}
+
+		if _, exists := result[fieldName]; exists {
+			log.Warnf("repeated field name detected at sheet %s row %d", sheet, rowIndex)
+			continue
+		}
+
+		typeString := row[1]
+		dataType := typeStringToDataType(typeString)
+		rawValue := row[2]
+
+		elementType := ""
+		if dataType == excelDataTypeList {
+			elementType = strings.TrimPrefix(typeString, excelDataTypeNameListPrefix)
+		}
+
+		value, err := convertRawValue(rawValue, dataType, elementType)
+		if err == nil {
+			result[fieldName] = value
+		} else {
+			log.Warnf("failed to convert value at sheet %s row %d: %s", sheet, rowIndex, err)
+		}
+	}
+
+	if err = rows.Close(); err != nil {
+		log.Warnf("failed to close sheet %s: %s\n", sheet, err)
+	}
+
+	return result, nil
 }
 
 // convertSheet converts a single sheet in Excel file to map object.
